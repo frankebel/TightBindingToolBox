@@ -52,6 +52,68 @@ function spectral_function(H::TightBindingHamiltonian,W,nk,σ)
 end
 
 """
+    greens_function(H::TightBindingHamiltonian,W::AbstractArray{<:Number},nk::Int,[Σ::AbstractMatrix{<:Number},indices])
+
+Calculate the (non-)interacting Green's function for a frequency grid `W`
+and `nk` momenta in each dimension.
+
+```math
+G(ω) = \frac{1}{nk^3} ∑_k (ω𝟙 - H_k - Σ_k)^{-1}
+```
+
+If the self-energy `Σ` is included, it is applied to each entry `[idx, idx]` of `indices`.
+"""
+function greens_function(H::TightBindingHamiltonian,W::AbstractVector{<:Number},nk::Int)
+    nk > 0 || throw(ArgumentError(lazy"negative number: nk = $(nk)"))
+    rk = range(0,1-1/nk,nk)
+    G = [zero(H.Hk) for _ in eachindex(W)]
+    for k in Iterators.product(rk,rk,rk)
+        bloch_hamiltonian!(H,collect(k)) # collect: Tuple → Array
+        E, V = LAPACK.syev!('V','U',H.Hk)
+        Threads.@threads for i in eachindex(W)
+            @inbounds G[i] .+= V * Diagonal(inv.(W[i] .- E)) * V'
+        end
+    end
+    rmul!.(G,1/nk^3) # normalize
+    return G
+end
+
+# interaction with self-energy Σ
+function greens_function(H::TightBindingHamiltonian,W::AbstractVector{<:Number},nk::Int,Σ::AbstractVector{<:Number},indices)
+    nk > 0 || throw(ArgumentError(lazy"negative number: nk = $(nk)"))
+    length(W) == length(Σ) || throw(ArgumentError("length mismatch: W, Σ"))
+    for idx in indices
+        1 <= idx <= number_of_bands(H) || throw(ArgumentError(lazy"index out of range: $(idx)"))
+    end
+    rk = range(0,1-1/nk,nk)
+    ks = Iterators.product(rk,rk,rk) # all momenta
+    G = [zero(H.Hk) for _ in eachindex(W)] # local Green's function
+    # Calculate dispersion relation once for each momentum.
+    # [H(k) for k in ks] gives multidimensional Array, therefore workaround below.
+    H_k = [similar(H.Hk) for _ in 1:length(ks)]
+    for (i, k) in enumerate(ks)
+        bloch_hamiltonian!(H_k[i], H, k)
+    end
+    # Calculate local Green's function
+    Threads.@threads for i in eachindex(W)
+        foo = similar(H.Hk)
+        for (j, _) in enumerate(ks)
+            # foo = ω - H_k - Σ
+            mul!(foo, H_k[j], -1)
+            for idx in 1:number_of_bands(H)
+                @inbounds foo[idx, idx] += W[i]
+            end
+            for idx in indices
+                @inbounds foo[idx, idx] -= Σ[i]
+            end
+            @inbounds G[i] .+= inv(foo)
+        end
+    end
+    rmul!.(G,1/nk^3) # normalize
+    return G
+end
+
+"""
 bz is a reciprocal lattice vector orthogonal to the surface
 bx,by are reciprocal lattice vectors that span the surface
 n_layer defines how many layers are contained in a superlayer (will become deprecated soon)

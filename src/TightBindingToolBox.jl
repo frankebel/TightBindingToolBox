@@ -34,6 +34,7 @@ module TightBindingToolBox
     include("bandstructure.jl")
     export path_in_bz, 
         bandstructure, 
+        greens_function,
         spectral_function,
         surface_bands,
         surface_spectral_density,
