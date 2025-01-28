@@ -52,6 +52,60 @@ function spectral_function(H::TightBindingHamiltonian,W,nk,σ)
 end
 
 """
+    greens_function(H::TightBindingHamiltonian,W::AbstractArray{<:Number},nk::Int,[Σ::AbstractMatrix{<:Number},indices::AbstractVector{<:Int}])
+
+Calculate the (non-)interacting Green's function for a frequency grid `W`
+and `nk` momenta in each dimension.
+
+```math
+G(ω) = \frac{1}{nk^3} ∑_k (ω𝟙 - H_k - Σ_k)^{-1}
+```
+
+If the self-energy `Σ` is included, it is applied to each entry `[idx, idx]` of `indices`.
+"""
+function greens_function(H::TightBindingHamiltonian,W::AbstractVector{<:Number},nk::Int)
+    nk > 0 || throw(ArgumentError(lazy"negative number: nk = $(nk)"))
+    rk = range(0,1-1/nk,nk)
+    G = [zero(H.Hk) for _ in eachindex(W)]
+    for k in Iterators.product(rk,rk,rk)
+        bloch_hamiltonian!(H,collect(k)) # collect: Tuple → Array
+        hermitianpart!(H.Hk)
+        E, V = LAPACK.syev!('V','U',H.Hk)
+        for i in eachindex(W)
+            @inbounds G[i] .+= V * Diagonal(inv.(W[i] .- E)) * V'
+        end
+    end
+    rmul!.(G,1/nk^3) # normalize
+    return G
+end
+
+# interaction with self-energy Σ
+function greens_function(H::TightBindingHamiltonian,W::AbstractVector{<:Number},nk::Int,Σ::AbstractVector{<:Number},indices::AbstractVector{<:Int})
+    nk > 0 || throw(ArgumentError(lazy"negative number: nk = $(nk)"))
+    for idx in indices
+        1 <= idx <= number_of_bands(H) || throw(ArgumentError(lazy"index out of range: $(idx)"))
+    end
+    rk = range(0,1-1/nk,nk)
+    G = [zero(H.Hk) for _ in eachindex(W)]
+    for k in Iterators.product(rk,rk,rk)
+        bloch_hamiltonian!(H,collect(k)) # collect: Tuple → Array
+        hermitianpart!(H.Hk)
+        E, V = LAPACK.syev!('V','U',H.Hk)
+        for i in eachindex(W)
+            d = W[i] .- E
+            # add self-energy to given indices
+            for idx in indices
+                @inbounds d[idx] -= Σ[i]
+            end
+            map!(inv,d,d)
+            @inbounds G[i] .+= V * Diagonal(d) * V'
+        end
+    end
+    rmul!.(G,1/nk^3) # normalize
+    return G
+end
+
+"""
 bz is a reciprocal lattice vector orthogonal to the surface
 bx,by are reciprocal lattice vectors that span the surface
 n_layer defines how many layers are contained in a superlayer (will become deprecated soon)
