@@ -43,20 +43,22 @@ function (H::TightBindingHamiltonian)(k)
 end
 
 """
-    bloch_hamiltonian!(H::TightBindingHamiltonian,k)
+    bloch_hamiltonian!([M=H.Hk,]H::TightBindingHamiltonian,k)
 
-Evaluate `H` at a momentum `k` and store it in `H.Hk`.
+Evaluate `H` at a momentum `k` and store it in `M` (default `H.Hk`).
 
 ```math
 H_k = ∑_R e^{2π\\mathrm{i}kR} H_R
 ```
 """
-function bloch_hamiltonian!(H::TightBindingHamiltonian,k) 
-    fill!(H.Hk,zero(ComplexF64))
+function bloch_hamiltonian!(M,H::TightBindingHamiltonian,k)
+    fill!(M,zero(ComplexF64))
     for (R,t) in pairs(H.terms)
-        H.Hk .+= t .* exp(2π*im * (k⋅R)) 
+        M .+= t .* exp(2π*im * (k⋅R))
     end
 end
+
+bloch_hamiltonian!(H::TightBindingHamiltonian, k) = bloch_hamiltonian!(H.Hk, H, k)
 
 function derivatives!(H::TightBindingHamiltonian,k,∂Hk)
     fill!(H.Hk,zero(eltype(H.Hk)))
